@@ -1,0 +1,221 @@
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  categories             Category[]
+  transactions           Transaction[]
+  funds                  Fund[]
+  investmentTransactions InvestmentTransaction[]
+  portfolioHoldings      PortfolioHolding[]
+  portfolioValueHistory  PortfolioValueHistory[]
+  goals                  Goal[]
+  netWorthAssets         NetWorthAsset[]
+  netWorthLiabilities    NetWorthLiability[]
+  netWorthHistory        NetWorthHistory[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  type      String   // 'income' | 'expense'
+  color     String?
+  icon      String?
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@map("categories")
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  categoryId  String?  @map("category_id")
+  type        String   // 'income' | 'expense'
+  amount      Decimal  @db.Decimal(15, 2)
+  date        DateTime @db.Date
+  description String?
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id])
+
+  @@map("transactions")
+}
+
+model Fund {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  isin      String
+  etfProxy  String?  @map("etf_proxy")    // ETF ticker for intraday estimation (e.g. "IWDA.AS")
+  currency  String   @default("EUR")
+  broker    String?  @default("MyInvestor")
+  category  String?  // 'world', 'sp500', 'emerging', 'bonds', 'nasdaq', 'other'
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  navHistory             FundNavHistory[]
+  investmentTransactions InvestmentTransaction[]
+  portfolioHolding       PortfolioHolding?
+
+  @@map("funds")
+}
+
+model FundNavHistory {
+  id        String   @id @default(uuid())
+  fundId    String   @map("fund_id")
+  date      DateTime @db.Date
+  nav       Decimal  @db.Decimal(15, 6)
+  source    String   @default("manual") // 'manual' | 'morningstar' | 'yahoo' | 'estimated'
+  createdAt DateTime @default(now()) @map("created_at")
+
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([fundId, date])
+  @@map("fund_nav_history")
+}
+
+model InvestmentTransaction {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  fundId        String   @map("fund_id")
+  type          String   // 'buy' | 'sell' | 'dividend' | 'transfer'
+  date          DateTime @db.Date
+  shares        Decimal  @db.Decimal(15, 6)
+  pricePerShare Decimal  @db.Decimal(15, 6) @map("price_per_share")
+  amount        Decimal  @db.Decimal(15, 2)
+  fees          Decimal  @default(0) @db.Decimal(10, 2)
+  description   String?
+  importSource  String?  @map("import_source") // 'myinvestor_csv' | 'myinvestor_xlsx' | 'manual'
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@map("investment_transactions")
+}
+
+model PortfolioHolding {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  fundId           String   @unique @map("fund_id")
+  shares           Decimal  @db.Decimal(15, 6)
+  avgPurchasePrice Decimal? @db.Decimal(15, 6) @map("avg_purchase_price")
+  totalInvested    Decimal  @default(0) @db.Decimal(15, 2) @map("total_invested")
+  lastUpdated      DateTime @default(now()) @map("last_updated")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fundId])
+  @@map("portfolio_holdings")
+}
+
+model PortfolioValueHistory {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  date          DateTime @db.Date
+  totalValue    Decimal  @db.Decimal(15, 2) @map("total_value")
+  totalInvested Decimal  @db.Decimal(15, 2) @map("total_invested")
+  dailyReturn   Decimal? @db.Decimal(10, 4) @map("daily_return")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("portfolio_value_history")
+}
+
+model Goal {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  name         String
+  type         String    // 'total_invested' | 'monthly_savings' | 'net_worth' | 'financial_independence' | 'custom'
+  targetAmount Decimal?  @db.Decimal(15, 2) @map("target_amount")
+  currentAmount Decimal  @default(0) @db.Decimal(15, 2) @map("current_amount")
+  targetDate   DateTime? @db.Date @map("target_date")
+  description  String?
+  icon         String?
+  color        String?
+  isCompleted  Boolean   @default(false) @map("is_completed")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+}
+
+model NetWorthAsset {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   // 'bank_account' | 'fund' | 'etf' | 'stock' | 'crypto' | 'vehicle' | 'real_estate' | 'other'
+  name      String
+  amount    Decimal  @db.Decimal(15, 2)
+  currency  String   @default("EUR")
+  date      DateTime @db.Date
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("net_worth_assets")
+}
+
+model NetWorthLiability {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   // 'mortgage' | 'loan' | 'credit_card' | 'debt' | 'other'
+  name      String
+  amount    Decimal  @db.Decimal(15, 2)
+  currency  String   @default("EUR")
+  date      DateTime @db.Date
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("net_worth_liabilities")
+}
+
+model NetWorthHistory {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  date             DateTime @db.Date
+  totalAssets      Decimal  @db.Decimal(15, 2) @map("total_assets")
+  totalLiabilities Decimal  @db.Decimal(15, 2) @map("total_liabilities")
+  netWorth         Decimal  @db.Decimal(15, 2) @map("net_worth")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("net_worth_history")
+}
